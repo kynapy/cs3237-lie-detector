@@ -1,30 +1,48 @@
 import cv2
 import os
-from time import sleep
+import serial
+from time import sleep, strftime
+from datetime import date, datetime
 
-frameWidth = 640
+frameWidth = 480
 frameHeight = 480
 
 cap = cv2.VideoCapture(0)
-cap.set(3, frameWidth)
-cap.set(4, frameHeight)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
 cap.set(10, 150)
 
-path = "images"
+path = "data/q35/"
 if not os.path.exists(path):
     os.makedirs(path)
     print("Directory created")
+else:
+    for filename in os.listdir(path):
+        os.remove(os.path.join(path, filename))
 
 os.chdir(path)
 
+serial = serial.Serial("/dev/cu.usbserial-110", 9600, timeout=1)
+f = open("hrData.txt", "w")
+
+currentTime = 0
 count = 0
 while cap.isOpened():
-    filename = "image_" + str(count) + ".png"
-    count += 1
+    now = datetime.now()
+    if currentTime == now.strftime("%H:%M:%S"):
+        count += 1
+    else:
+        currentTime = now.strftime("%H:%M:%S")
+        count = 0
+    filename = "image_" + currentTime + "_" + str(count) +".png"
     success, img = cap.read()
     if success:
-        #cv2.imshow("Result", img)
+        data = serial.readline()
+        data = data.decode("utf-8", errors='ignore')
+        f.write("(" + currentTime + "_" + str(count) + ") : ")
+        f.write(data)
+        print(data)
         cv2.imwrite(filename, img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-    sleep(10)
+    sleep(0.2)
