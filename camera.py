@@ -12,7 +12,7 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
 cap.set(10, 150)
 
-path = "data/q35/"
+path = "data/q35"
 if not os.path.exists(path):
     os.makedirs(path)
     print("Directory created")
@@ -22,7 +22,7 @@ else:
 
 os.chdir(path)
 
-serial = serial.Serial("/dev/cu.usbserial-110", 9600, timeout=1)
+serial = serial.Serial("/dev/cu.usbserial-10", 9600, timeout=1)
 f = open("hrData.txt", "w")
 
 currentTime = 0

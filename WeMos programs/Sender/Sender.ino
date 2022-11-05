@@ -12,9 +12,6 @@
 DHT_Unified dht(DHTPIN, DHTTYPE);
 
 // WiFi
-const char* ssid = "bd9b7a";
-const char* password = "5553575353";
-
 const char* ssid2 = "kynapy";
 const char* password2 = "KYNAPY123";
 
