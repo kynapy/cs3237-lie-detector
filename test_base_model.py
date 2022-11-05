@@ -4,8 +4,8 @@ import torch
 from torchvision import transforms
 from PIL import Image
 
-MODEL_PATH = "./fer_base_model.pth                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            .pth"
-IMAGE_DIR = "./affectnet_hq/archive/anger"
+MODEL_PATH = "./fer_base_model.pth"
+IMAGE_DIR = "./images"
 CATEGORY_DICT = ("Anger", "Contempt", "Disgust", "Fear", "Happy", "Neutral", "Sad", "Surprise")
 
 def load_image(img_path):
@@ -20,7 +20,7 @@ def load_image(img_path):
 
 
 if __name__ == "__main__":
-    imgs = [os.path.join(IMAGE_DIR, file) for file in os.listdir(IMAGE_DIR)]
+    imgs = [os.path.join(IMAGE_DIR, file) for file in os.listdir(IMAGE_DIR) if file.endswith(".png")]
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = torch.load(MODEL_PATH, map_location=device)
     model.eval()

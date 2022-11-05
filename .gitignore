@@ -1,3 +1,6 @@
 /tensorflow-dev
 /venv
 /data
+fer_base_model.zip
+/images
+fer_base_model.pth

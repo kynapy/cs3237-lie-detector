@@ -13,16 +13,16 @@ def on_message(client, userdata, msg):
     sleep(2)
     message = str(msg.payload.decode("utf-8"))
     print(message)
-    result = toFahrenheit(float(message))
-    print("Sending results", end = "\n\n")
-    client.publish("CS3237/Group_22/classification", result)
+    #result = toFahrenheit(float(message))
+    #print("Sending results", end = "\n\n")
+    #client.publish("CS3237/Group_22/classification", result)
 
 def setup(hostname):
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
     print("Connecting")
-    client.connect(hostname, 1883, 60)
+    client.connect(hostname, 1883)
     client.loop_start()
     return client
 
@@ -30,9 +30,6 @@ def main():
     setup("broker.emqx.io")
     while True:
         pass
-
-def toFahrenheit(temp):
-    return round(temp * (9/5) + 32, 3)
 
 if __name__ == "__main__":
     main()
