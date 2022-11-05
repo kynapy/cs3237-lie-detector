@@ -30,23 +30,18 @@ def setup(hostname):
     return client
 
 def main():
-    setup("broker.emqx.io")
+    client = setup("broker.emqx.io")
     while True:
         while cap.isOpened():
             success, img = cap.read()
             if success:
-                #data = serial.readline()
-                #data = data.decode("utf-8", errors='ignore')
-                #f.write("(" + currentTime + "_" + str(count) + ") : ")
-                #f.write(data)
-                #print(data)
                 imgShape = len(img)
                 img = img[int(imgShape*0.2):int(imgShape*0.8), int(imgShape*0.2):int(imgShape*0.8)]
                 img = cv2.resize(img, (256, 256), interpolation= cv2.INTER_CUBIC)
-                cv2.imwrite(filename, img)
+                client.publish("CS3237/Group_22/images")
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
-            sleep(0.2)
+            sleep(1)
 
 if __name__ == "__main__":
     main()
