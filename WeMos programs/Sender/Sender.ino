@@ -58,7 +58,7 @@ void setup() {
   connectToWifi();
   connectToMqtt();
   dht.begin();
-  //client.publish(topic, "Joined Group_22/data");
+  client.publish(topic, "Joined Group_22/data");
   client.subscribe(topic);
 }
 
@@ -80,6 +80,7 @@ void loop() {
   dht.temperature().getEvent(&event);
   if (isnan(event.temperature)) {
     Serial.println("Error reading temperature");
+    client.publish(topic, "Error");
   } else {
     char temp[10];
     dtostrf(event.temperature, 4, 4, temp);
