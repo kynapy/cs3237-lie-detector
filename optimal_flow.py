@@ -12,7 +12,7 @@ def normalize(img):
     return (img - m) / s
 
 
-class face_landmarks(object):
+class FaceLandmarks(object):
 
     def __init__(self):
         self.detector = dlib.get_frontal_face_detector()
@@ -31,7 +31,7 @@ class face_landmarks(object):
         return np.array(pos)
 
 
-class dense_flow(object):
+class DenseFlow(object):
 
     def __init__(self):
         self.RLOF = cv2.optflow.DenseRLOFOpticalFlow_create()
@@ -40,11 +40,54 @@ class dense_flow(object):
     def __call__(self, prev, next, opt="RLOF"):
         cv_prev = cv2.cvtColor(prev, cv2.COLOR_RGB2BGR)
         cv_next = cv2.cvtColor(next, cv2.COLOR_RGB2BGR)
+        cv_prev_gray = cv2.cvtColor(cv_prev, cv2.COLOR_BGR2GRAY)
+        cv_next_gray = cv2.cvtColor(cv_next, cv2.COLOR_BGR2GRAY)
         if opt == "RLOF":
-            flow = self.RLOF.calc(cv_prev, cv_next, None)
+            try:
+                flow = self.RLOF.calc(cv_prev, cv_next, None)
+            except:
+                flow = self.RLOF.calc(cv_prev_gray, cv_next_gray, None)
         elif opt == "TVL1":
-            cv_prev_gray = cv2.cvtColor(cv_prev , cv2.COLOR_BGR2GRAY)
-            cv_next_gray = cv2.cvtColor(cv_next, cv2.COLOR_BGR2GRAY)
             flow = self.TVL1.calc(cv_prev_gray, cv_next_gray, None)
-        else: ValueError()
+        else:
+            ValueError()
         return np.transpose(flow, (2, 0, 1))
+
+
+def uniform_choose(iterable, num_sample):
+    l = len(iterable)
+    i, interval = 0, l / num_sample
+    choice = []
+    for _ in range(num_sample):
+        choice.append(iterable[int(round(i))])
+        i += interval
+    return choice
+
+
+class BatchFlow(object):
+
+    def __init__(self, num_frames):
+        self.denseflow = DenseFlow()
+        self.landmarks = FaceLandmarks()
+        self.num_frames = num_frames
+
+    def __call__(self, imgs, seq_len):
+        flows = []
+        for (i, img) in enumerate(imgs):
+            sample = uniform_choose(range(seq_len[i]), self.num_frames)
+            frames = [img[j].clone().detach().cpu().numpy() for j in sample]
+            flow = []
+            for j in range(len(frames)):
+                landmark = self.landmarks(frames[j])
+                markmat = np.expand_dims(np.zeros_like(frames[j][:, :, 0]), 0)
+                for x, y in landmark:
+                    markmat[0][x][y] = 1
+                flow.append(markmat)
+                if j > 0:
+                    try:
+                        flow.append(self.denseflow(frames[j - 1], frames[j], "RLOF"))
+                    except:
+                        flow.append(self.denseflow(frames[j - 1], frames[j], "TVL1"))
+            flow = np.concatenate(flow, axis=0)
+            flows.append(flow)
+        return np.array(flows)
