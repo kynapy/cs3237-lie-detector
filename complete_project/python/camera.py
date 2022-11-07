@@ -6,6 +6,8 @@ This code is used for the camera to upload the images to CS3237/Group_22/data/im
 import cv2
 import paho.mqtt.client as mqtt
 from time import sleep
+import json
+from datetime import datetime
 
 # Camera initialization
 frameWidth = 480
@@ -13,7 +15,7 @@ frameHeight = 480
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print("Connected with the result code" + str(rc))
+        print("Connected with the result code " + str(rc))
     else:
         print("Connection failed with error code: %d." % rc)
 
@@ -37,6 +39,14 @@ def main():
     cap.set(10, 150)
 
     while cap.isOpened():
+        now = datetime.now()
+        currentTime = 0
+        if currentTime == now.strftime("%H:%M:%S"):
+            count += 1
+        else:
+            currentTime = now.strftime("%H:%M:%S")
+            count = 0
+        filename = "image_" + currentTime + "_" + str(count) +".png"
         success, img = cap.read()
         if success:
             imgShape = len(img)
@@ -44,11 +54,13 @@ def main():
             img = cv2.resize(img, (256, 256), interpolation= cv2.INTER_CUBIC)
 
             # Send image up through MQTT broker
-            client.publish("CS3237/Group_22/data/images", img)
+            img_list = img.tolist()
+            send_dict = {"filename":filename, "data" : img_list}
+            client.publish("CS3237/Group_22/data/images", json.dumps(send_dict))
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-        sleep(0.5)
+            #if cv2.waitKey(1) & 0xFF == ord('q'):
+            #   break
+        sleep(1)
 
 if __name__ == "__main__":
     main()
