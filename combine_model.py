@@ -14,7 +14,7 @@ from torchvision import models, transforms
 from PIL import Image
 
 from meterbar import Summary, AverageMeter, ProgressMeter
-from optimal_flow import BatchFlow
+from optical_flow import BatchFlow
 
 DATASETS_DIR = "./second_data"
 BASE_MODEL_PATH = "./small_base_model.pth.tar"
