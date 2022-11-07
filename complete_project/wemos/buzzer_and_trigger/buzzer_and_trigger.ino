@@ -80,9 +80,12 @@ void setup() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  char message[length+1];
-  memcpy(message, &payload, length);
-  message[length] = '\0';
+  for (int i=0; i<length; i++){
+    char receivedChar = (char)payload[i];
+    if (receivedChar == '1'){ // LIE!!!!!!!
+      buzz();
+    }
+  }
 }
 
 void buzz(){
