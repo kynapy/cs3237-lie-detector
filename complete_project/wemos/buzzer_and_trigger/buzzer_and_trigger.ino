@@ -5,6 +5,7 @@
 
 // Button Sensor
 #define BUTTON D5
+#define speakerPin D6
 
 // WiFi
 const char* ssid = "kynapy";
@@ -16,6 +17,8 @@ const int mqtt_port = 1883;
 
 volatile byte state = LOW;
 volatile static unsigned long last_isr_time = 0;
+const unsigned long buzzDura = 5000;
+uint32_t buzzTime = 0;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -69,6 +72,7 @@ void setup() {
   Serial.begin(9600);
   connectToWifi();
   connectToMqtt();
+  pinMode(speakerPin, OUTPUT);
   pinMode(BUTTON, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BUTTON),toggle, RISING);
   //client.publish(topic, "Joined Group_22/data");
@@ -81,8 +85,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
   message[length] = '\0';
 }
 
+void buzz(){
+  if(buzzTime == 0){
+    analogWrite(speakerPin,255);
+    buzzTime = millis();
+  }
+}
 
 void loop() {
   // put your main code here, to run repeatedly:
-
+  if(millis() - buzzTime >= buzzDura){
+    analogWrite(speakerPin,0);
+  }
 }
