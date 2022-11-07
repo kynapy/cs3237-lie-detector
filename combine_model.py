@@ -3,86 +3,191 @@ import shutil
 import time
 import random
 import platform
-from enum import Enum
 import numpy as np
 import torch
-from torch import nn, optim, distributed
+from torch import nn, optim
 from torch.backends import cudnn
 from torch.optim.lr_scheduler import StepLR
 from torch.utils import data
 from torch.nn.utils import rnn
 from torchvision import models, transforms
 from PIL import Image
-from sklearn.model_selection import KFold
 
-DATA_DIR = "./second_step"
-BASE_MODEL_PATH = "./fer_base_model_best.pth.tar"
+from meterbar import Summary, AverageMeter, ProgressMeter
+from optimal_flow import face_landmarks, dense_flow
+
+DATASETS_DIR = "./second_data"
+BASE_MODEL_PATH = "./base_model.pth.tar"
 RESUME_PATH = "./predict_model.pth.tar"
 NUM_CLASSES = 8
+NUM_FRAMES = 9
 BATCH_SIZE = 4
 NUM_EPOCES = 10
-PRINT_FREQ = 5
+PRINT_FREQ = 10
+KFOLD = 4
+
+
+class ImgModel(nn.Module):
+
+    def __init__(self, num_classes, weights=None):
+        super().__init__()
+        if weights:
+            base_model = models.regnet_y_400mf(weights=None)
+            base_model.fc = nn.Linear(440, num_classes)
+            checkpoint = torch.load(weights)
+            base_model.load_state_dict(checkpoint["state_dict"], strict=False)
+        else:
+            base_model = models.regnet_y_400mf(weights="DEFAULT")
+            base_model.fc = nn.Linear(440, num_classes)
+        self.model = base_model
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class FlowModel(nn.Module):
+
+    def __init__(self, in_channel, num_classes):
+        super().__init__()
+        self.model = models.regnet_y_400mf(weights="DEFAULT")
+        self.model.stem = nn.Sequential(nn.Conv2d(in_channel, 32, 3, 2, 1), nn.BatchNorm2d(32), nn.ReLU(True))
+        self.model.fc = nn.Linear(440, num_classes)
+
+    def forward(self, x):
+        return self.model(x)
 
 
 class Model(nn.Module):
 
-    def __init__(self, base_classes, hidden_dim=64, lstm_layers=2, dropout=0.5):
+    def __init__(self, num_classes, num_frames, weights=None, hidden_size1=64, hidden_size2=8):
         super().__init__()
-        self.base_model = models.regnet_y_1_6gf(weights=None)
-        self.base_model.fc = nn.Linear(888, base_classes)
-        self.lstm = nn.LSTM(input_size=base_classes + 1, hidden_size=hidden_dim, num_layers=lstm_layers, dropout=dropout, batch_first=True)
-        self.dense = nn.Sequential(nn.BatchNorm1d(hidden_dim), nn.Linear(hidden_dim, 1), nn.Sigmoid())
+        self.num_classes = num_classes
+        self.num_frames = num_frames
+        self.img_model = ImgModel(num_classes, weights)
+        self.flow_model = FlowModel(3 * num_frames - 2, hidden_size1)
+        self.lstm1 = nn.LSTM(input_size=num_classes, hidden_size=hidden_size1, num_layers=3, dropout=0.5, batch_first=True, bidirectional=True)
+        self.lstm2 = nn.LSTM(input_size=1, hidden_size=hidden_size2, num_layers=2, batch_first=True, bidirectional=True)
+        self.dense = nn.Sequential(nn.Linear(3 * hidden_size1 + 2 * hidden_size2, 1), nn.Sigmoid())
+        self.landmarks = face_landmarks()
+        self.denseflow = dense_flow()
+        self.norm = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
     def forward(self, imgs, rates, seq_len):
-        img_vecs = [self.base_model(img[:seq_len[i]]) for (i, img) in enumerate(imgs)]
-        pad_imgvecs = rnn.pad_sequence(img_vecs, batch_first=True, padding_value=0)
-        conbine = torch.concat((pad_imgvecs, rates.unsqueeze(2)), dim=2)
-        conbine = rnn.pack_padded_sequence(conbine, seq_len, batch_first=True, enforce_sorted=False)
-        lstm_out, hidden = self.lstm(conbine)
-        lstm_out, output_lens = rnn.pad_packed_sequence(lstm_out, batch_first=True)
-        return self.dense(lstm_out[:, -1, :])
+        img_vecs, flows = [], []
+        for (i, img) in enumerate(imgs):
+            sample = uniform_choose(range(seq_len[i]), self.num_frames)
+            frames = [img[j].clone().detach().cpu().numpy() for j in sample]
+            flow = []
+            for j in range(len(frames)):
+                landmark = self.landmarks(frames[j])
+                markmat = np.expand_dims(np.zeros_like(frames[j][:,:,0]), 0)
+                for x, y in landmark:
+                    markmat[0][x][y] = 1
+                flow.append(markmat)
+                if j > 0:
+                    flow.append(self.denseflow(frames[j - 1], frames[j], "RLOF"))
+            flow = np.concatenate(flow, axis=0)
+            flows.append(flow)
 
-    def load_base(self, base_state=None):
-        if base_state:
-            checkpoint = torch.load(base_state)
-            self.base_model.load_state_dict(checkpoint["state_dict"])
+            norm_image = []
+            for l in range(seq_len[i]):
+                norm_image.append(self.norm(img[l].clone().detach().cpu().numpy()).numpy())
+            norm_image = torch.tensor(np.array(norm_image), dtype=torch.float32, device=device)
+            img_vecs.append(self.img_model(norm_image))
+
+        pad_img = rnn.pad_sequence(img_vecs, batch_first=True, padding_value=0)
+        pack_img = rnn.pack_padded_sequence(pad_img, seq_len, batch_first=True, enforce_sorted=False)
+        img_out, _ = self.lstm1(pack_img)
+        img_out, _ = rnn.pad_packed_sequence(img_out, batch_first=True)
+
+        flows = np.array(flows)
+        flows_vec = self.flow_model(torch.tensor(flows, dtype=torch.float32, device=device))
+
+        hr_packed = rnn.pack_padded_sequence(rates.unsqueeze(2), seq_len, batch_first=True, enforce_sorted=False)
+        hr_out, _ = self.lstm2(hr_packed)
+        hr_out, _ = rnn.pad_packed_sequence(hr_out, batch_first=True)
+
+        out = torch.concat((img_out[:, -1, :], flows_vec, hr_out[:, -1, :]), dim=1)
+        return self.dense(out)
 
 
-def load_dataset(data_dir, valid_split, seed=3237):
+def load_dataset(data_dir, seed=3237):
     transform = transforms.Compose([
-        transforms.RandomResizedCrop(224, interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.ColorJitter(brightness=.3, hue=.3, contrast=.3, saturation=.3),
-        transforms.RandomEqualize(),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
     ])
     srcs, tgts = [], []
-    categories = os.listdir(data_dir)
-    length = 0
-    for i, cat in enumerate(categories, 0):
-        cat_base = os.path.join(DATA_DIR, cat)
-        questions = [os.path.join(cat_base, folder) for folder in os.listdir(cat_base)]
+    datasets = [os.path.join(data_dir, dir) for dir in os.listdir(data_dir) if not dir.endswith(".zip")]
+    for dataset in datasets:
+        lies = os.path.join(dataset, "lie")
+        truths = os.path.join(dataset, "truth")
+        questions = [os.path.join(lies, folder) for folder in os.listdir(lies)]
         for q in questions:
             imgfiles = [f for f in os.listdir(q) if f.endswith(".png")]
-            imgs = torch.tensor(np.array([transform(Image.open(os.path.join(q, f))).numpy() for f in imgfiles]))
+            imgs = np.array([np.array(transform(Image.open(os.path.join(q, f)))) for f in imgfiles])
             with open(os.path.join(q, "hrData.txt")) as hrfile:
-                numbers = [s.split(" : ") for s in hrfile.readlines()]
-                assert not [n for n in numbers if len(n) == 3]
-                timestamps = [os.path.splitext(f)[0].lstrip("image_") for f in imgfiles]
-                hrdata = [float(s[1]) for s in numbers if s[0].lstrip("(").rstrip(")").replace(":", "_") in timestamps]
-            assert len(imgs) == len(hrdata)
-            srcs.append((imgs, torch.tensor(hrdata)))
-            tgts.append(i)
-            length += 1
+                hrdata = np.array([float(line.split()[-1]) for line in hrfile.readlines()])
+            try:
+                assert len(imgs) == len(hrdata)
+            except:
+                print("Not the same length:", q)
+            else:
+                srcs.append((torch.tensor(imgs, dtype=torch.uint8), torch.tensor(hrdata, dtype=torch.float32)))
+                tgts.append(0)
+        questions = [os.path.join(truths, folder) for folder in os.listdir(truths)]
+        for q in questions:
+            imgfiles = [f for f in os.listdir(q) if f.endswith(".png")]
+            imgs = np.array([np.array(transform(Image.open(os.path.join(q, f)))) for f in imgfiles])
+            with open(os.path.join(q, "hrData.txt")) as hrfile:
+                hrdata = np.array([float(line.split()[-1]) for line in hrfile.readlines()])
+            try:
+                assert len(imgs) == len(hrdata)
+            except:
+                print("Not the same length:", q)
+            else:
+                srcs.append((torch.tensor(imgs, dtype=torch.uint8), torch.tensor(hrdata, dtype=torch.float32)))
+                tgts.append(1)
     random.seed(seed)
     random.shuffle(srcs)
     random.seed(seed)
     random.shuffle(tgts)
-    valid_len = max(int(length * valid_split), 1)
-    train_len = length - valid_len
+    return srcs, tgts
+
+
+def Kfold(all_data, K):
+    srcs, tgts = all_data
+    total = len(tgts)
+    onefold = total / K
+    print("Data loaded:", total)
+    inter = [0] + [int(round(onefold * k)) for k in range(1, K)] + [total + 1]
+    sfolds = [srcs[inter[i]:inter[i + 1]] for i in range(K)]
+    tfolds = [tgts[inter[i]:inter[i + 1]] for i in range(K)]
+    ret = []
+    for i in range(K):
+        strain, ttrain = [], []
+        for j in range(K):
+            if j != i:
+                strain.extend(sfolds[j])
+                ttrain.extend(tfolds[j])
+        ret.append(((strain, ttrain), (sfolds[i], tfolds[i])))
+
+
+def split_data(all_data, k):
+    srcs, tgts = all_data
+    total = len(tgts)
+    val_len = int(k * total)
+    train_len = total - val_len
+    print("Data loaded: train %d, validation %d" % (train_len, val_len))
     return (srcs[:train_len], tgts[:train_len]), (srcs[train_len:], tgts[train_len:])
+
+
+def uniform_choose(iterable, num_sample):
+    l = len(iterable)
+    i, interval = 0, l / num_sample
+    choice = []
+    for _ in range(num_sample):
+        choice.append(iterable[int(round(i))])
+        i += interval
+    return choice
 
 
 class MyData(data.Dataset):
@@ -94,6 +199,16 @@ class MyData(data.Dataset):
         self.len = len(self.tgts)
 
     def __getitem__(self, i: int):
+        # transform = transforms.Compose([
+        # transforms.RandomResizedCrop(224, interpolation=transforms.InterpolationMode.BICUBIC),
+        # transforms.ColorJitter(brightness=.3, hue=.3, contrast=.3, saturation=.3),
+        # transforms.RandomEqualize(),
+        # transforms.RandomHorizontalFlip(),
+        #     transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
+        # ])
+        # origin_img, hrdata = self.srcs[i]
+        # new_img = torch.tensor(np.array([transform(img).numpy() for img in origin_img]))
+        # return (new_img, hrdata), self.tgts[i]
         return self.srcs[i], self.tgts[i]
 
     def __len__(self):
@@ -110,14 +225,14 @@ def padding(data):
     return (pad_imgs, pad_hr, torch.tensor(target)), length
 
 
-def main_worker(data_dir, num_classes, batch_size, epochs, base_resume=None, resume=None, workers=0):
-    model = Model(num_classes).to(device)
-    model.load_base(base_resume)
+def main_worker(data_dir, num_classes, num_frames, batch_size, epochs, base_resume=None, resume=None, workers=0, K=0):
+    model = Model(num_classes, num_frames, base_resume).to(device)
     criterion = nn.BCELoss().to(device)
-    optimizer = optim.AdamW(model.parameters(), 2e-5, weight_decay=3e-4)
+    optimizer = optim.AdamW(model.parameters(), 3e-4, weight_decay=3e-4)
     scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
 
-    train_data, val_data = load_dataset(data_dir, 0.2)
+    all_data = load_dataset(data_dir, seed=1)
+    train_data, val_data = split_data(all_data, 0.25)
     train_loader = data.DataLoader(MyData(train_data), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True, collate_fn=padding)
     val_loader = data.DataLoader(MyData(val_data), batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True, collate_fn=padding)
 
@@ -226,88 +341,8 @@ def validate(val_loader, model, criterion, print_freq=PRINT_FREQ):
 def save_checkpoint(state, filename, is_best=False):
     torch.save(state, filename)
     if is_best:
-        best_path = os.path.splitext(os.path.splitext(filename)[0])[0] + "_new.pth.tar"
+        best_path = os.path.splitext(os.path.splitext(filename)[0])[0] + "_best.pth.tar"
         shutil.copyfile(filename, best_path)
-
-
-class Summary(Enum):
-    NONE = 0
-    AVERAGE = 1
-    SUM = 2
-    COUNT = 3
-
-
-class AverageMeter(object):
-
-    def __init__(self, name, fmt=":f", summary_type=Summary.AVERAGE):
-        self.name = name
-        self.fmt = fmt
-        self.summary_type = summary_type
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-    def all_reduce(self):
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        else:
-            device = torch.device("cpu")
-        total = torch.tensor([self.sum, self.count], dtype=torch.float32, device=device)
-        distributed.all_reduce(total, distributed.ReduceOp.SUM, async_op=False)
-        self.sum, self.count = total.tolist()
-        self.avg = self.sum / self.count
-
-    def __str__(self):
-        fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
-        return fmtstr.format(**self.__dict__)
-
-    def summary(self):
-        fmtstr = ""
-        if self.summary_type is Summary.NONE:
-            fmtstr = ""
-        elif self.summary_type is Summary.AVERAGE:
-            fmtstr = "{name} {avg:.3f}"
-        elif self.summary_type is Summary.SUM:
-            fmtstr = "{name} {sum:.3f}"
-        elif self.summary_type is Summary.COUNT:
-            fmtstr = "{name} {count:.3f}"
-        else:
-            raise ValueError("invalid summary type %r" % self.summary_type)
-
-        return fmtstr.format(**self.__dict__)
-
-
-class ProgressMeter(object):
-
-    def __init__(self, num_batches, meters, prefix=""):
-        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
-        self.meters = meters
-        self.prefix = prefix
-
-    def display(self, batch):
-        entries = [self.prefix + self.batch_fmtstr.format(batch)]
-        entries += [str(meter) for meter in self.meters]
-        print("\t".join(entries))
-
-    def display_summary(self):
-        entries = [" *"]
-        entries += [meter.summary() for meter in self.meters]
-        print(" ".join(entries))
-
-    def _get_batch_fmtstr(self, num_batches):
-        num_digits = len(str(num_batches // 1))
-        fmt = "{:" + str(num_digits) + "d}"
-        return "[" + fmt + "/" + fmt.format(num_batches) + "]"
 
 
 def accuracy(output, target, topk=(1, )):
@@ -335,4 +370,4 @@ if __name__ == "__main__":
         print("Using CPU.")
         device = torch.device("cpu")
     workers = 2 if platform.system() == "Linux" else 0
-    main_worker(DATA_DIR, NUM_CLASSES, BATCH_SIZE, NUM_EPOCES, BASE_MODEL_PATH, RESUME_PATH, workers)
+    main_worker(DATASETS_DIR, NUM_CLASSES, NUM_FRAMES, BATCH_SIZE, NUM_EPOCES, BASE_MODEL_PATH, RESUME_PATH, workers, KFOLD)
