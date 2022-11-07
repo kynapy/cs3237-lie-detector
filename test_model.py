@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 from PIL import Image
 import numpy as np
@@ -8,12 +9,6 @@ from torch import nn, optim
 from torch.nn.utils import rnn
 from torchvision import models, transforms
 from optical_flow import BatchFlow
-
-DATA_DIR = ""
-MODEL_PATH = "./predict_model.pth"
-CONTINUE_UPDATE = False
-NUM_CLASSES = 8
-NUM_FRAMES = 9
 
 
 class ImgModel(nn.Module):
@@ -54,6 +49,7 @@ class Model(nn.Module):
 
     def __init__(self, num_classes, num_frames, weights=None, hidden_dim=64):
         super().__init__()
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.num_classes = num_classes
         self.num_frames = num_frames
         self.hidden = hidden_dim
@@ -70,7 +66,7 @@ class Model(nn.Module):
             norm_image = []
             for l in range(seq_len[i]):
                 norm_image.append(self.norm(img[l].clone().detach().cpu().numpy()).numpy())
-            norm_image = torch.tensor(np.array(norm_image), dtype=torch.float32)
+            norm_image = torch.tensor(np.array(norm_image), dtype=torch.float32, device=self.device)
             img_vecs.append(self.img_model(norm_image))
 
         pad_img = rnn.pad_sequence(img_vecs, batch_first=True, padding_value=0)
@@ -130,12 +126,18 @@ class Prediction(object):
         print("Load model:", end=" ")
         start = time.perf_counter()
         self.model = Model(num_classes, num_frames).to(self.device)
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        try:
+            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        except:
+            shutil.copy(model_path + ".bak", model_path)
+            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        else:
+            shutil.copy(model_path, model_path + ".bak")
         end = time.perf_counter()
         print("Done. Time: %.2fms." % (1000 * (end - start)))
         self.loader = LoadData(num_frames, self.device)
         self.criterion = nn.BCELoss().to(self.device)
-        self.optimizer = optim.SGD(self.model.parameters(), 1e-5, mometum=0.9, weight_decay=1e-4)
+        self.optimizer = optim.SGD(self.model.parameters(), 1e-5, momentum=0.9, weight_decay=1e-4)
 
     def load_data(self, data_dir):
         print("Load data:", end=" ")
@@ -167,7 +169,7 @@ class Prediction(object):
         end = time.perf_counter()
         print("Done. Time: %.2fms." % (1000 * (end - start)))
         print("Credibility: %.2f%%." % (output.item() * 100))
-        ans = int(input("Correct answer:\n1. Lie\n2.Truth"))
+        ans = int(input("Correct answer:/n1. Lie/n2.Truth"))
         print("Update model:", end=" ")
         start = time.perf_counter()
         target = torch.tensor([[ans]], dtype=torch.float32, device=self.device)
@@ -187,6 +189,7 @@ class Prediction(object):
         return res
 
     def __del__(self):
+        print("End prediction and resave the model")
         torch.save(self.model.state_dict(), self.path)
         del self.device, self.model, self.loader, self.criterion, self.optimizer
         if torch.cuda.is_available(): torch.cuda.empty_cache()
