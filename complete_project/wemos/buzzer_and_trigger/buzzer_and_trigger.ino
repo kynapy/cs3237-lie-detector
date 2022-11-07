@@ -7,26 +7,41 @@
 #define BUTTON D5
 
 // WiFi
-const char* ssid2 = "kynapy";
-const char* password2 = "KYNAPY123";
+const char* ssid = "kynapy";
+const char* password = "KYNAPY123";
 
 const char* mqtt_broker = "broker.emqx.io";
 const char* topic = "CS3237/Group_22/start";
 const int mqtt_port = 1883;
 
 volatile byte state = LOW;
+volatile static unsigned long last_isr_time = 0;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+IRAM_ATTR void toggle() {
+  unsigned long interrupt_time = millis();
+  if (interrupt_time - last_isr_time > 200) {
+    if (!state){
+      client.publish(topic, "start");
+    } else {
+      client.publish(topic, "stop");
+    }
+    state = !state;
+    Serial.println("Button pressed");
+    last_isr_time = interrupt_time;
+  }
+}
+
 void connectToWifi() {
-  WiFi.begin(ssid2, password2);
+  WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.println("Connecting to WiFi...");
   }
   Serial.print("Connected to: ");
-  Serial.println(ssid2);
+  Serial.println(ssid);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }
@@ -49,28 +64,9 @@ void connectToMqtt() {
   }
 }
 
-IRAM_ATTR void toggle(){
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  if (interrupt_time - last_interrupt_time > 200) {
-    if(state){
-      client.publish(topic, "Start read");
-      Serial.println((String)topic + " => on");
-      //start taking pictures
-      state=!state;
-      }
-    else{
-      client.publish(topic, "off");
-      Serial.println((String)topic + " => off");
-      state=!state;
-      }
-   }
-   last_interrupt_time = interrupt_time;
-}
-
 void setup() {
   // put your setup code here, to run once:
-  Serial.begin(115200);
+  Serial.begin(9600);
   connectToWifi();
   connectToMqtt();
   pinMode(BUTTON, INPUT_PULLUP);
@@ -80,16 +76,13 @@ void setup() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived in topic: ");
-  Serial.println(topic);
-  Serial.print("Message: ");
-  for (int i = 0; i < length; i++){
-    Serial.print((char) payload[i]);
-  }
-  Serial.println();
-  Serial.println("________________");
+  char message[length+1];
+  memcpy(message, &payload, length);
+  message[length] = '\0';
 }
 
+
 void loop() {
-  // put your main code here, to run repeatedly: 
+  // put your main code here, to run repeatedly:
+
 }
