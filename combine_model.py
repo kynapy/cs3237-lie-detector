@@ -14,10 +14,11 @@ from torchvision import models, transforms
 from PIL import Image
 
 from meterbar import Summary, AverageMeter, ProgressMeter
-from optimal_flow import face_landmarks, dense_flow
+from optimal_flow import BatchFlow
 
 DATASETS_DIR = "./second_data"
-BASE_MODEL_PATH = "./base_model.pth.tar"
+BASE_MODEL_PATH = "./small_base_model.pth.tar"
+BEST_PATH = "./predict_model_best.pth.tar"
 RESUME_PATH = "./predict_model.pth.tar"
 NUM_CLASSES = 8
 NUM_FRAMES = 9
@@ -29,15 +30,19 @@ KFOLD = 4
 
 class ImgModel(nn.Module):
 
-    def __init__(self, num_classes, weights=None):
+    def __init__(self, num_classes, weights="default"):
         super().__init__()
         if weights:
-            base_model = models.regnet_y_400mf(weights=None)
-            base_model.fc = nn.Linear(440, num_classes)
-            checkpoint = torch.load(weights)
-            base_model.load_state_dict(checkpoint["state_dict"], strict=False)
+            if weights == "default":
+                base_model = models.regnet_y_400mf(weights="DEFAULT")
+                base_model.fc = nn.Linear(440, num_classes)
+            else:
+                base_model = models.regnet_y_400mf(weights=None)
+                base_model.fc = nn.Linear(440, num_classes)
+                checkpoint = torch.load(weights)
+                base_model.load_state_dict(checkpoint["state_dict"], strict=False)
         else:
-            base_model = models.regnet_y_400mf(weights="DEFAULT")
+            base_model = models.regnet_y_400mf(weights=None)
             base_model.fc = nn.Linear(440, num_classes)
         self.model = base_model
 
@@ -59,36 +64,21 @@ class FlowModel(nn.Module):
 
 class Model(nn.Module):
 
-    def __init__(self, num_classes, num_frames, weights=None, hidden_size1=64, hidden_size2=8):
+    def __init__(self, num_classes, num_frames, weights=None, hidden_dim=64):
         super().__init__()
         self.num_classes = num_classes
         self.num_frames = num_frames
+        self.hidden = hidden_dim
         self.img_model = ImgModel(num_classes, weights)
-        self.flow_model = FlowModel(3 * num_frames - 2, hidden_size1)
-        self.lstm1 = nn.LSTM(input_size=num_classes, hidden_size=hidden_size1, num_layers=3, dropout=0.5, batch_first=True, bidirectional=True)
-        self.lstm2 = nn.LSTM(input_size=1, hidden_size=hidden_size2, num_layers=2, batch_first=True, bidirectional=True)
-        self.dense = nn.Sequential(nn.Linear(3 * hidden_size1 + 2 * hidden_size2, 1), nn.Sigmoid())
-        self.landmarks = face_landmarks()
-        self.denseflow = dense_flow()
+        self.flow_model = FlowModel(3 * num_frames - 2, hidden_dim)
+        self.lstm1 = nn.LSTM(input_size=num_classes, hidden_size=hidden_dim, num_layers=3, dropout=0.5, batch_first=True, bidirectional=True)
+        self.lstm2 = nn.LSTM(input_size=1, hidden_size=hidden_dim, num_layers=2, batch_first=True, bidirectional=True)
+        self.dense = nn.Sequential(nn.Conv1d(5, 1, 1), nn.Flatten(), nn.Linear(hidden_dim, 1), nn.Sigmoid())
         self.norm = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
-    def forward(self, imgs, rates, seq_len):
-        img_vecs, flows = [], []
+    def forward(self, imgs, flows, rates, seq_len):
+        img_vecs = []
         for (i, img) in enumerate(imgs):
-            sample = uniform_choose(range(seq_len[i]), self.num_frames)
-            frames = [img[j].clone().detach().cpu().numpy() for j in sample]
-            flow = []
-            for j in range(len(frames)):
-                landmark = self.landmarks(frames[j])
-                markmat = np.expand_dims(np.zeros_like(frames[j][:,:,0]), 0)
-                for x, y in landmark:
-                    markmat[0][x][y] = 1
-                flow.append(markmat)
-                if j > 0:
-                    flow.append(self.denseflow(frames[j - 1], frames[j], "RLOF"))
-            flow = np.concatenate(flow, axis=0)
-            flows.append(flow)
-
             norm_image = []
             for l in range(seq_len[i]):
                 norm_image.append(self.norm(img[l].clone().detach().cpu().numpy()).numpy())
@@ -100,14 +90,16 @@ class Model(nn.Module):
         img_out, _ = self.lstm1(pack_img)
         img_out, _ = rnn.pad_packed_sequence(img_out, batch_first=True)
 
-        flows = np.array(flows)
-        flows_vec = self.flow_model(torch.tensor(flows, dtype=torch.float32, device=device))
+        flows_vec = self.flow_model(flows)
 
         hr_packed = rnn.pack_padded_sequence(rates.unsqueeze(2), seq_len, batch_first=True, enforce_sorted=False)
         hr_out, _ = self.lstm2(hr_packed)
         hr_out, _ = rnn.pad_packed_sequence(hr_out, batch_first=True)
 
-        out = torch.concat((img_out[:, -1, :], flows_vec, hr_out[:, -1, :]), dim=1)
+        img_feature = img_out[:, -1, :].view(-1, 2, self.hidden)
+        flow_feature = flows_vec.unsqueeze(1)
+        hr_feature = hr_out[:, -1, :].view(-1, 2, self.hidden)
+        out = torch.concat((img_feature, flow_feature, hr_feature), dim=1)
         return self.dense(out)
 
 
@@ -180,16 +172,6 @@ def split_data(all_data, k):
     return (srcs[:train_len], tgts[:train_len]), (srcs[train_len:], tgts[train_len:])
 
 
-def uniform_choose(iterable, num_sample):
-    l = len(iterable)
-    i, interval = 0, l / num_sample
-    choice = []
-    for _ in range(num_sample):
-        choice.append(iterable[int(round(i))])
-        i += interval
-    return choice
-
-
 class MyData(data.Dataset):
 
     def __init__(self, dataset):
@@ -225,13 +207,13 @@ def padding(data):
     return (pad_imgs, pad_hr, torch.tensor(target)), length
 
 
-def main_worker(data_dir, num_classes, num_frames, batch_size, epochs, base_resume=None, resume=None, workers=0, K=0):
+def main_worker(data_dir, num_classes, num_frames, batch_size, epochs, base_resume=None, resume=None, best=None, workers=0, K=0):
     model = Model(num_classes, num_frames, base_resume).to(device)
     criterion = nn.BCELoss().to(device)
     optimizer = optim.AdamW(model.parameters(), 3e-4, weight_decay=3e-4)
     scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
 
-    all_data = load_dataset(data_dir, seed=1)
+    all_data = load_dataset(data_dir)
     train_data, val_data = split_data(all_data, 0.25)
     train_loader = data.DataLoader(MyData(train_data), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True, collate_fn=padding)
     val_loader = data.DataLoader(MyData(val_data), batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True, collate_fn=padding)
@@ -250,9 +232,11 @@ def main_worker(data_dir, num_classes, num_frames, batch_size, epochs, base_resu
         start_epoch = 0
         best_acc1 = 0
 
+    process = BatchFlow(num_frames)
+
     for epoch in range(start_epoch, epochs):
-        train(train_loader, model, criterion, optimizer, epoch, device)
-        acc1 = validate(val_loader, model, criterion)
+        train(train_loader, model, criterion, optimizer, epoch, device, process)
+        acc1 = validate(val_loader, model, criterion, process)
         scheduler.step()
         is_best = acc1 > best_acc1
         best_acc1 = max(acc1, best_acc1)
@@ -262,11 +246,15 @@ def main_worker(data_dir, num_classes, num_frames, batch_size, epochs, base_resu
             "best_acc1": best_acc1,
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict()
-        }, resume, is_best)
+        }, resume, best, is_best)
         torch.cuda.empty_cache()
 
+    checkpoint = torch.load(BEST_PATH, map_location=device)
+    model.load_state_dict(checkpoint["state_dict"])
+    torch.save(model, "prediction_model.pth")
 
-def train(train_loader, model, criterion, optimizer, epoch, device, print_freq=PRINT_FREQ):
+
+def train(train_loader, model, criterion, optimizer, epoch, device, process=None, print_freq=PRINT_FREQ):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses = AverageMeter("Loss", ":.4e")
@@ -282,9 +270,12 @@ def train(train_loader, model, criterion, optimizer, epoch, device, print_freq=P
 
         images = images.to(device, non_blocking=True)
         rates = rates.to(device, non_blocking=True)
+        length = length.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
+        if process:
+            flows = torch.tensor(process(images, length), dtype=torch.float32, device=device)
 
-        output = model(images, rates, length)
+        output = model(images, flows, rates, length)
         loss = criterion(output, target.unsqueeze(1))
 
         acc1 = accuracy(output, target, topk=(1, ))[0]
@@ -302,7 +293,7 @@ def train(train_loader, model, criterion, optimizer, epoch, device, print_freq=P
             progress.display(i + 1)
 
 
-def validate(val_loader, model, criterion, print_freq=PRINT_FREQ):
+def validate(val_loader, model, criterion, process=None, print_freq=PRINT_FREQ):
 
     batch_time = AverageMeter("Time", ":6.3f", Summary.NONE)
     losses = AverageMeter("Loss", ":.4e", Summary.NONE)
@@ -318,9 +309,12 @@ def validate(val_loader, model, criterion, print_freq=PRINT_FREQ):
 
             images = images.to(device, non_blocking=True)
             rates = rates.to(device, non_blocking=True)
+            length = length.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
+            if process:
+                flows = torch.tensor(process(images, length), dtype=torch.float32, device=device)
 
-            output = model(images, rates, length)
+            output = model(images, flows, rates, length)
             loss = criterion(output, target.unsqueeze(1))
 
             acc1 = accuracy(output, target, topk=(1, ))[0]
@@ -338,10 +332,9 @@ def validate(val_loader, model, criterion, print_freq=PRINT_FREQ):
     return top1.avg
 
 
-def save_checkpoint(state, filename, is_best=False):
+def save_checkpoint(state, filename, best_path=None, is_best=False):
     torch.save(state, filename)
     if is_best:
-        best_path = os.path.splitext(os.path.splitext(filename)[0])[0] + "_best.pth.tar"
         shutil.copyfile(filename, best_path)
 
 
@@ -366,8 +359,9 @@ if __name__ == "__main__":
         print("Using GPU.")
         device = torch.device("cuda")
         cudnn.benchmark = True
+        torch.cuda.empty_cache()
     else:
         print("Using CPU.")
         device = torch.device("cpu")
     workers = 2 if platform.system() == "Linux" else 0
-    main_worker(DATASETS_DIR, NUM_CLASSES, NUM_FRAMES, BATCH_SIZE, NUM_EPOCES, BASE_MODEL_PATH, RESUME_PATH, workers, KFOLD)
+    main_worker(DATASETS_DIR, NUM_CLASSES, NUM_FRAMES, BATCH_SIZE, NUM_EPOCES, BASE_MODEL_PATH, RESUME_PATH, BEST_PATH, workers, KFOLD)
