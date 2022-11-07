@@ -15,6 +15,7 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected with result code " +str(rc))
         client.subscribe("CS3237/Group_22/start")
+        print("Subscribed to /start")
     else:
         print("Connection failed with error code: %d." % rc)
 
@@ -24,22 +25,29 @@ def on_message(client, userdata, msg):
     print(message)
     if message == "start":
         # Start collecting data 
+        print("Start data collection...")
         client.subscribe("CS3237/Group_22/data/images")
+        print("Subscribed to /data/images")
         client.subscribe("CS3237/Group_22/data/heartrate")
+        print("Subscribed to /data/heartrate", end = "\n\n")
 
         # Store data in temporary folder
 
     elif message == "stop":
         # Terminate data collection
         client.unsubscribe("CS3237/Group_22/data/images")
+        print("Unsubscribed from /data/images")
         client.unsubscribe("CS3237/Group_22/data/heartrate")
-
+        print("Unsubscribed from /data/heartrate", end = "\n\n")
+            
         # Calculate result using model
         lie = False # (TODO)
 
         # Return result
         if lie:
-            client.publish("CS3237/Group_22/start", "lies")
+            client.publish("CS3237/Group_22/start", "lie")
+    else:
+        pass
 
 def setup(hostname):
     client = mqtt.Client()
