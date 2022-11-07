@@ -10,6 +10,8 @@ from torch.nn.utils import rnn
 from torchvision import models, transforms
 from optical_flow import BatchFlow
 
+DATA_DIR = ""
+
 
 class ImgModel(nn.Module):
 
@@ -138,6 +140,7 @@ class Prediction(object):
         self.loader = LoadData(num_frames, self.device)
         self.criterion = nn.BCELoss().to(self.device)
         self.optimizer = optim.SGD(self.model.parameters(), 1e-5, momentum=0.9, weight_decay=1e-4)
+        torch.save(self.model.state_dict(), self.path)
 
     def load_data(self, data_dir):
         print("Load data:", end=" ")
@@ -162,18 +165,18 @@ class Prediction(object):
         return output.item()
 
     def update_predict(self, images, flows, rates, length):
-        print("Make prediction:")
+        print("Make prediction:", end=" ")
         start = time.perf_counter()
         self.model.train()
         output = self.model(images, flows, rates, length)
         end = time.perf_counter()
         print("Done. Time: %.2fms." % (1000 * (end - start)))
         print("Credibility: %.2f%%." % (output.item() * 100))
-        ans = int(input("Correct answer:/n1. Lie/n2.Truth"))
+        ans = int(input("Correct answer:\n1. Lie\t2.Truth\n"))
         print("Update model:", end=" ")
         start = time.perf_counter()
         target = torch.tensor([[ans]], dtype=torch.float32, device=self.device)
-        loss = self.criterion(output, target.unsqueeze(0))
+        loss = self.criterion(output, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -181,15 +184,32 @@ class Prediction(object):
         print("Done. Time: %.2fms." % (1000 * (end - start)))
         return output.item()
 
+    def resave(self, path=None):
+        print("Resave model:", end=" ")
+        start = time.perf_counter()
+        if not path: path = self.path
+        torch.save(self.model.state_dict(), path)
+        end = time.perf_counter()
+        print("Done. Time: %.2fms." % (1000 * (end - start)))
+
     def __call__(self, data_dir, update=False):
         images, flows, rates, length = self.load_data(data_dir)
-        if update: res = self.update_predict(images, flows, rates, length)
-        else: res = self.predict(images, flows, rates, length)
+        if update: 
+            res = self.update_predict(images, flows, rates, length)
+            self.resave()
+        else: 
+            res = self.predict(images, flows, rates, length)
         if torch.cuda.is_available(): torch.cuda.empty_cache()
         return res
 
     def __del__(self):
-        print("End prediction and resave the model")
-        torch.save(self.model.state_dict(), self.path)
+        print("End prediction.")
         del self.device, self.model, self.loader, self.criterion, self.optimizer
         if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+
+if __name__ == "__main__":
+    prediction = Prediction()
+    output = prediction(DATA_DIR)
+    # output = prediction(DATA_DIR, True)
+    print(output)
