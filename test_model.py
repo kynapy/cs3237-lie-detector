@@ -7,7 +7,7 @@ from torch.backends import cudnn
 from torch import nn, optim
 from torch.nn.utils import rnn
 from torchvision import models, transforms
-from optimal_flow import BatchFlow
+from optical_flow import BatchFlow
 
 DATA_DIR = ""
 MODEL_PATH = "./predict_model.pth"
