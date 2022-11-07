@@ -70,7 +70,7 @@ class Model(nn.Module):
             norm_image = []
             for l in range(seq_len[i]):
                 norm_image.append(self.norm(img[l].clone().detach().cpu().numpy()).numpy())
-            norm_image = torch.tensor(np.array(norm_image), dtype=torch.float32, device=device)
+            norm_image = torch.tensor(np.array(norm_image), dtype=torch.float32)
             img_vecs.append(self.img_model(norm_image))
 
         pad_img = rnn.pad_sequence(img_vecs, batch_first=True, padding_value=0)
@@ -93,9 +93,10 @@ class Model(nn.Module):
 
 class LoadData(object):
 
-    def __init__(self, num_frames):
+    def __init__(self, num_frames, device=torch.device("cpu")):
         self.denseflow = BatchFlow(num_frames)
         self.transform = transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC)
+        self.device = device
 
     def __call__(self, data_dir):
         imgfiles = [f for f in os.listdir(data_dir) if f.endswith(".png")]
@@ -108,54 +109,84 @@ class LoadData(object):
             print("Not the same length!")
             return None
         length = [len(imgs)]
-        imgs = torch.tensor(imgs, dtype=torch.uint8, device=device).unsqueeze_(0)
-        flows = torch.tensor(self.denseflow(imgs, length), dtype=torch.float32, device=device)
-        hrdata = torch.tensor(hrdata, dtype=torch.float32, device=device).unsqueeze_(0)
+        imgs = torch.tensor(imgs, dtype=torch.uint8).unsqueeze_(0)
+        flows = torch.tensor(self.denseflow(imgs, length), dtype=torch.float32)
+        hrdata = torch.tensor(hrdata, dtype=torch.float32).unsqueeze_(0)
         return imgs, flows, hrdata, length
 
 
-if __name__ == "__main__":
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        cudnn.benchmark = True
-        print("Running on GPU.")
-        torch.cuda.empty_cache()
-    else:
-        device = torch.device("cpu")
-        print("Running on CPU.")
-    print("Load model: ", end="")
-    start = time.perf_counter()
-    model = Model(NUM_CLASSES, NUM_FRAMES).to(device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-    end = time.perf_counter()
-    print("Done. Time: %.2fms." % (1000 * (end - start)))
-    print("Load data: ", end="")
-    start = time.perf_counter()
-    loader = LoadData(NUM_FRAMES)
-    images, flows, rates, length = loader(DATA_DIR)
-    end = time.perf_counter()
-    print("Done. Time: %.2fms." % (1000 * (end - start)))
-    print("Processing: ", end="")
-    start = time.perf_counter()
-    if CONTINUE_UPDATE:
-        model.train()
-        criterion = nn.BCELoss().to(device)
-        optimizer = optim.SGD(model.parameters(), 1e-5, mometum=0.9, weight_decay=3e-4)
-        output = model(images, flows, rates, length)
-        print("Done.\nCredibility: %.2f%%" % (output.item() * 100))
+class Prediction(object):
+
+    def __init__(self, num_classes=8, num_frames=9, model_path="./predict_model.pth"):
+        self.path = model_path
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            cudnn.benchmark = True
+            print("Running on GPU.")
+            torch.cuda.empty_cache()
+        else:
+            self.device = torch.device("cpu")
+            print("Running on CPU.")
+        print("Load model:", end=" ")
+        start = time.perf_counter()
+        self.model = Model(num_classes, num_frames).to(self.device)
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         end = time.perf_counter()
-        print("Time: %.2fms" % (1000 * (end - start)))
-        ans = int(input("Correct answer:\n1. Lie\n2.Truth"))
-        target = torch.tensor([[ans]], dtype=torch.float32, device=device)
-        loss = criterion(output, target.unsqueeze(1))
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    else:
-        model.eval()
+        print("Done. Time: %.2fms." % (1000 * (end - start)))
+        self.loader = LoadData(num_frames, self.device)
+        self.criterion = nn.BCELoss().to(self.device)
+        self.optimizer = optim.SGD(self.model.parameters(), 1e-5, mometum=0.9, weight_decay=1e-4)
+
+    def load_data(self, data_dir):
+        print("Load data:", end=" ")
+        start = time.perf_counter()
+        images, flows, rates, length = self.loader(data_dir)
+        end = time.perf_counter()
+        print("Done. Time: %.2fms." % (1000 * (end - start)))
+        images = images.to(self.device, non_blocking=True)
+        flows = flows.to(self.device, non_blocking=True)
+        rates = rates.to(self.device, non_blocking=True)
+        return images, flows, rates, length
+
+    def predict(self, images, flows, rates, length):
+        print("Make prediction:", end=" ")
+        start = time.perf_counter()
+        self.model.eval()
         with torch.no_grad():
-            output = model(images, flows, rates, length)
-            print("Done.\nCredibility: %.2f%%" % (output.item() * 100))
+            output = self.model(images, flows, rates, length)
         end = time.perf_counter()
-        print("Time: %.2fms" % (1000 * (end - start)))
-    if torch.cuda.is_available(): torch.cuda.empty_cache()
+        print("Done. Time: %.2fms." % (1000 * (end - start)))
+        print("Credibility: %.2f%%." % (output.item() * 100))
+        return output.item()
+
+    def update_predict(self, images, flows, rates, length):
+        print("Make prediction:")
+        start = time.perf_counter()
+        self.model.train()
+        output = self.model(images, flows, rates, length)
+        end = time.perf_counter()
+        print("Done. Time: %.2fms." % (1000 * (end - start)))
+        print("Credibility: %.2f%%." % (output.item() * 100))
+        ans = int(input("Correct answer:\n1. Lie\n2.Truth"))
+        print("Update model:", end=" ")
+        start = time.perf_counter()
+        target = torch.tensor([[ans]], dtype=torch.float32, device=self.device)
+        loss = self.criterion(output, target.unsqueeze(0))
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        end = time.perf_counter()
+        print("Done. Time: %.2fms." % (1000 * (end - start)))
+        return output.item()
+
+    def __call__(self, data_dir, update=False):
+        images, flows, rates, length = self.load_data(data_dir)
+        if update: res = self.update_predict(images, flows, rates, length)
+        else: res = self.predict(images, flows, rates, length)
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
+        return res
+
+    def __del__(self):
+        torch.save(self.model.state_dict(), self.path)
+        del self.device, self.model, self.loader, self.criterion, self.optimizer
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
