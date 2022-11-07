@@ -44,7 +44,7 @@ def main():
             img = cv2.resize(img, (256, 256), interpolation= cv2.INTER_CUBIC)
 
             # Send image up through MQTT broker
-            client.publish("CS3237/Group_22/images")
+            client.publish("CS3237/Group_22/data/images", img)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break

@@ -13,7 +13,7 @@ const char* ssid = "kynapy";
 const char* password = "KYNAPY123";
 
 const char* mqtt_broker = "broker.emqx.io";
-const char* topic = "CS3237/Group_22/data";
+const char* topic = "CS3237/Group_22/data/heartrate";
 const int mqtt_port = 1883;
 
 WiFiClient espClient;

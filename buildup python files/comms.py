@@ -10,7 +10,6 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     print("Received message: ", end="")
-    sleep(2)
     message = str(msg.payload.decode("utf-8"))
     print(message)
     #result = toFahrenheit(float(message))
