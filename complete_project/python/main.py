@@ -50,7 +50,7 @@ def on_message(client, userdata, msg):
             
         # Calculate result using model
         lie = False # (TODO)
-        result = Prediction("/data")
+        result = Prediction(path)
         lie = (result<0.5)
 
         #for filename in os.listdir(path):
