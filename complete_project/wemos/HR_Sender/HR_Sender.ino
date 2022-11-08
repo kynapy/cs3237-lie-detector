@@ -54,7 +54,7 @@ void setup() {
   Serial.begin(9600);
   connectToWifi();
   connectToMqtt();
-  client.publish(topic, "Joined Group_22/data");
+  //client.publish(topic, "Joined Group_22/data");
   //client.subscribe(topic);
 }
 
@@ -108,8 +108,8 @@ void loop() {
         last_beat = millis();
         print_value = 60000. / (0.4 * first + 0.3 * second + 0.3 * third);
         char hrValue[10];
-        Serial.println(print_value);
         dtostrf(print_value, 4, 4, hrValue);
+        Serial.println(hrValue);
         client.publish(topic, hrValue);
         third = second;
         second = first;
