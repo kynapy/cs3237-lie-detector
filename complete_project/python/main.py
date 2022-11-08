@@ -52,12 +52,17 @@ def on_message(client, userdata, msg):
             
         # Calculate result using model
         global prediction
-        result = prediction("./data")
+        result = prediction(os.getcwd())
+        try:
+            assert result>=0 and result<=1
+        except:
+            print("Invalid input")
+            exit(1)
         lie = (result<0.5)
 
         # Clear the data folder
-        for filename in os.listdir(os.getcwd()):
-            os.remove(os.path.join(os.getcwd(), filename))
+        #for filename in os.listdir(os.getcwd()):
+        #    os.remove(os.path.join(os.getcwd(), filename))
 
         # Return result
         if lie:
@@ -71,7 +76,7 @@ def on_message(client, userdata, msg):
             cv2.imwrite(recv_dict["filename"], img_data)
 
     else:   # HR data
-        print("Heart rate received: ")
+        print("Heart rate received: ", end="")
         currentTime = 0
         count = 0
         now = datetime.now()

@@ -193,7 +193,11 @@ class Prediction(object):
         print("Done. Time: %.2fms." % (1000 * (end - start)))
 
     def __call__(self, data_dir, update=False):
-        images, flows, rates, length = self.load_data(data_dir)
+        try:
+            images, flows, rates, length = self.load_data(data_dir)
+        except:
+            print("No valid data!")
+            return -1
         if update: 
             res = self.update_predict(images, flows, rates, length)
             self.resave()
