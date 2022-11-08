@@ -4,3 +4,7 @@
 fer_base_model.zip
 /images
 fer_base_model.pth
+/complete_project/python/data
+/complete_project/python/shape_predictor_68_face_landmarks.dat
+/model.tar.bz2
+/complete_project/python/predict_model.pth
