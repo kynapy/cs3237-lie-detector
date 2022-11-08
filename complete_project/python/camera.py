@@ -16,6 +16,7 @@ frameHeight = 480
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected with the result code " + str(rc))
+        client.subscribe("CS3237/Group_22/data/images")
     else:
         print("Connection failed with error code: %d." % rc)
 
@@ -57,10 +58,8 @@ def main():
             img_list = img.tolist()
             send_dict = {"filename":filename, "data" : img_list}
             client.publish("CS3237/Group_22/data/images", json.dumps(send_dict))
-
-            #if cv2.waitKey(1) & 0xFF == ord('q'):
-            #   break
-        sleep(1)
-
-if __name__ == "__main__":
-    main()
+            sleep(0.5)
+            if cv2.waitKey(10) & 0xFF == ord('q'):
+               break
+        cv2.waitKey(10)
+main()
