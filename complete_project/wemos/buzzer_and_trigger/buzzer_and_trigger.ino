@@ -17,8 +17,6 @@ const int mqtt_port = 1883;
 
 volatile byte state = LOW;
 volatile static unsigned long last_isr_time = 0;
-const unsigned long buzzDura = 5000;
-uint32_t buzzTime = 0;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -35,6 +33,10 @@ IRAM_ATTR void toggle() {
     Serial.println("Button pressed");
     last_isr_time = interrupt_time;
   }
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  buzz();
 }
 
 void connectToWifi() {
@@ -76,26 +78,17 @@ void setup() {
   pinMode(BUTTON, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BUTTON),toggle, RISING);
   //client.publish(topic, "Joined Group_22/data");
-  client.subscribe(topic);
+  client.subscribe("CS3237/Group_22/result");
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  for (int i=0; i<length; i++){
-    char receivedChar[i] = (char)payload[i];
-  }
-  if (receivedChar == 'lie'){ // LIE!!!!!!!
-    buzz();
-  }
-}
-
-void buzz(){
+void buzz() {
   analogWrite(speakerPin,255);
-  buzzTime = millis();
+  //buzzTime = millis();
+  delay(2000);
+  analogWrite(speakerPin, 0);
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if(millis() - buzzTime >= buzzDura){
-    analogWrite(speakerPin,0);
-  }
+  client.loop();
 }
