@@ -12,7 +12,8 @@ import os
 from datetime import datetime
 import json
 import numpy as np
-from PIL import image
+from PIL import Image
+import cv2
 
 collectData = False
 path = "data/"
@@ -21,12 +22,11 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected with result code " +str(rc))
         client.subscribe("CS3237/Group_22/start")
-        print("Subscribed to /start")
+        print("Subscribed to /start", end = "\n\n")
     else:
         print("Connection failed with error code: %d." % rc)
 
 def on_message(client, userdata, msg):
-    print("Message received.")
     message = str(msg.payload.decode("utf-8"))
     if message == "start":
         # Start collecting data 
@@ -37,10 +37,12 @@ def on_message(client, userdata, msg):
         print("Subscribed to /data/heartrate", end = "\n\n")
         
         # Store data in temporary folder
-        global hrFile 
+        global hrFile
         hrFile = open("hrData.txt", "w")      # .txt to store hr data
 
     elif message == "stop":
+        print("Reading stopped.")
+
         # Terminate data collection
         client.unsubscribe("CS3237/Group_22/data/images")
         print("Unsubscribed from /data/images")
@@ -49,23 +51,26 @@ def on_message(client, userdata, msg):
             
         # Calculate result using model
         lie = False # (TODO)
-        #for filename in os.listdir(path):
-        #    os.remove(os.path.join(path, filename))    # Clear data folder
+
+        # Clear the data folder
+        for filename in os.listdir(os.getcwd()):
+            os.remove(os.path.join(os.getcwd(), filename))    # Clear data folder
 
         # Return result
         if lie:
             client.publish("CS3237/Group_22/start", "lie")
 
-    elif message[0] == "[":    # Image data
+    elif message[0] == "{":    # Image data
+        print("Image received")
         recv_dict = json.loads(msg.payload)
         img_data = np.array(recv_dict["data"])
-        img = image.fromarray(img_data)
-        img.save(recv_dict["filename"])
+        if img_data.any():
+            cv2.imwrite(recv_dict["filename"], img_data)
 
-    else:   # HR datd
+    else:   # HR data
+        print("Heart rate received: ")
         currentTime = 0
         count = 0
-        heartrate = message[2:]
         now = datetime.now()
         if currentTime == now.strftime("%H:%M:%S"):
             count += 1
@@ -77,8 +82,6 @@ def on_message(client, userdata, msg):
         hrFile.flush()
         print(message)
 
-    #else:
-    #    print(message)
 
 def setup(hostname):
     client = mqtt.Client()
