@@ -61,7 +61,7 @@ def on_message(client, userdata, msg):
 
         # Return result
         if lie:
-            client.publish("CS3237/Group_22/start", "lie")
+            client.publish("CS3237/Group_22/result", "lie")
 
     elif message[0] == "{":    # Image data
         print("Image received")
