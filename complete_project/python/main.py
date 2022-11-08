@@ -13,10 +13,10 @@ from datetime import datetime
 import json
 import numpy as np
 import cv2
-from test_model import Prediction
+#from test_model import Prediction
 
 collectData = False
-prediction = Prediction()
+#prediction = Prediction()
 path = "data/"
 
 def on_connect(client, userdata, flags, rc):
@@ -52,16 +52,16 @@ def on_message(client, userdata, msg):
             
         # Calculate result using model
         global prediction
-        result = prediction("./data")
-        lie = (result<0.5)
+        #result = prediction("./data")
+        #lie = (result<0.5)
 
         # Clear the data folder
         for filename in os.listdir(os.getcwd()):
             os.remove(os.path.join(os.getcwd(), filename))
 
         # Return result
-        if lie:
-            client.publish("CS3237/Group_22/start", "lie")
+        #if lie:
+        #    client.publish("CS3237/Group_22/start", "lie")
 
     elif message[0] == "{":    # Image data
         print("Image received")
