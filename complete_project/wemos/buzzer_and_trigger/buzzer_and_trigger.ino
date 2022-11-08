@@ -81,18 +81,16 @@ void setup() {
 
 void callback(char* topic, byte* payload, unsigned int length) {
   for (int i=0; i<length; i++){
-    char receivedChar = (char)payload[i];
-    if (receivedChar == '1'){ // LIE!!!!!!!
-      buzz();
-    }
+    char receivedChar[i] = (char)payload[i];
+  }
+  if (receivedChar == 'lie'){ // LIE!!!!!!!
+    buzz();
   }
 }
 
 void buzz(){
-  if(buzzTime == 0){
-    analogWrite(speakerPin,255);
-    buzzTime = millis();
-  }
+  analogWrite(speakerPin,255);
+  buzzTime = millis();
 }
 
 void loop() {

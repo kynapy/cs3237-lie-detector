@@ -8,8 +8,10 @@ Publishes to CS3237/Group_22/start the results of the ML model
 '''
 
 import paho.mqtt.client as mqtt
+from test_model import Prediction
 
 collectData = False
+prediction = Prediction()
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -42,6 +44,9 @@ def on_message(client, userdata, msg):
             
         # Calculate result using model
         lie = False # (TODO)
+        result = prediction("/data")
+        lie = (result<0.5)
+
 
         # Return result
         if lie:
