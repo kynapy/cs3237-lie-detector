@@ -12,10 +12,11 @@ import os
 from datetime import datetime
 import json
 import numpy as np
-from PIL import Image
 import cv2
+from test_model import Prediction
 
 collectData = False
+prediction = Prediction()
 path = "data/"
 
 def on_connect(client, userdata, flags, rc):
@@ -50,11 +51,13 @@ def on_message(client, userdata, msg):
         print("Unsubscribed from /data/heartrate", end = "\n\n")
             
         # Calculate result using model
-        lie = False # (TODO)
+        global prediction
+        result = prediction("./data")
+        lie = (result<0.5)
 
         # Clear the data folder
         for filename in os.listdir(os.getcwd()):
-            os.remove(os.path.join(os.getcwd(), filename))    # Clear data folder
+            os.remove(os.path.join(os.getcwd(), filename))
 
         # Return result
         if lie:
