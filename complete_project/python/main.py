@@ -13,6 +13,7 @@ from datetime import datetime
 import json
 import numpy as np
 from PIL import image
+from test_model import Prediction
 
 collectData = False
 path = "data/"
@@ -49,7 +50,7 @@ def on_message(client, userdata, msg):
             
         # Calculate result using model
         lie = False # (TODO)
-        result = prediction("/data")
+        result = Prediction("/data")
         lie = (result<0.5)
 
         #for filename in os.listdir(path):
