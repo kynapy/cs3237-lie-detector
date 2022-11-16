@@ -10,6 +10,7 @@ import paho.mqtt.client as mqtt
 import os
 from datetime import datetime
 import json
+from time import sleep
 import numpy as np
 import cv2
 from test_model import Prediction
@@ -28,7 +29,6 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     message = str(msg.payload.decode("utf-8"))
-    # print(message)
     if message == "start":
         # Start collecting data 
         print("Start data collection...")
@@ -49,6 +49,7 @@ def on_message(client, userdata, msg):
         # Terminate data collection
         client.unsubscribe("CS3237/Group_22/data")
         print("Unsubscribed from /data")
+        wait(5)
             
         # Calculate result using model
         global prediction
@@ -64,6 +65,7 @@ def on_message(client, userdata, msg):
         # Return result
         if lie:
             client.publish("CS3237/Group_22/lie", "lie")
+            print("Lie Detected")
 
     else:   # Image data
         print("Image received")
