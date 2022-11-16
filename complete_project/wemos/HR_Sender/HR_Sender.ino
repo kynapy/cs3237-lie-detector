@@ -110,7 +110,7 @@ void loop() {
         char hrValue[10];
         dtostrf(print_value, 4, 4, hrValue);
         Serial.println(hrValue);
-        client.publish(topic, hrValue);
+        //client.publish(topic, hrValue);
         third = second;
         second = first;
       }

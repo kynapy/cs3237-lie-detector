@@ -58,8 +58,7 @@ def main():
             img_list = img.tolist()
             send_dict = {"filename":filename, "data" : img_list}
             client.publish("CS3237/Group_22/data/images", json.dumps(send_dict))
-            sleep(0.5)
             if cv2.waitKey(10) & 0xFF == ord('q'):
                break
-        cv2.waitKey(10)
+        sleep(0.2)
 main()
