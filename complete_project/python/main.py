@@ -1,9 +1,8 @@
 '''
 Main code used to operate. 
-Subscribes to CS3237/Group_22/data/images for facial images
-Subscribes to CS3237/Group_22/data/heartrate for heart rate
+Subscribes to CS3237/Group_22/data for facial images and heart rate data
 Subscribes to CS3237/Group_22/start for instructions
-Publishes to CS3237/Group_22/start the results of the ML model
+Publishes to CS3237/Group_22/lie the results of the ML model
 
 '''
 
@@ -11,6 +10,7 @@ import paho.mqtt.client as mqtt
 import os
 from datetime import datetime
 import json
+from time import sleep
 import numpy as np
 import cv2
 from test_model import Prediction
@@ -32,10 +32,12 @@ def on_message(client, userdata, msg):
     if message == "start":
         # Start collecting data 
         print("Start data collection...")
-        client.subscribe("CS3237/Group_22/data/images")
-        print("Subscribed to /data/images")
-        client.subscribe("CS3237/Group_22/data/heartrate")
-        print("Subscribed to /data/heartrate", end = "\n\n")
+        client.subscribe("CS3237/Group_22/data")
+        print("Subscribed to CS3237/Group_22/data")
+
+        # Clear the data folder
+        for filename in os.listdir(os.getcwd()):
+            os.remove(os.path.join(os.getcwd(), filename))
         
         # Store data in temporary folder
         global hrFile
@@ -45,10 +47,8 @@ def on_message(client, userdata, msg):
         print("Reading stopped.")
 
         # Terminate data collection
-        client.unsubscribe("CS3237/Group_22/data/images")
-        print("Unsubscribed from /data/images")
-        client.unsubscribe("CS3237/Group_22/data/heartrate")
-        print("Unsubscribed from /data/heartrate", end = "\n\n")
+        client.unsubscribe("CS3237/Group_22/data")
+        print("Unsubscribed from CS3237/Group_22/data")
             
         # Calculate result using model
         global prediction
@@ -58,37 +58,32 @@ def on_message(client, userdata, msg):
         except:
             print("Invalid input")
             exit(1)
+        result = prediction(os.getcwd())
         lie = (result<0.5)
-
-        # Clear the data folder
-        #for filename in os.listdir(os.getcwd()):
-        #    os.remove(os.path.join(os.getcwd(), filename))
 
         # Return result
         if lie:
-            client.publish("CS3237/Group_22/result", "lie")
+            client.publish("CS3237/Group_22/lie", "lie")
+            print("Published to CS3237/Group_22/lie")
 
-    elif message[0] == "{":    # Image data
+    else:   # Image data
         print("Image received")
         recv_dict = json.loads(msg.payload)
         img_data = np.array(recv_dict["data"])
         if img_data.any():
             cv2.imwrite(recv_dict["filename"], img_data)
-
-    else:   # HR data
-        print("Heart rate received: ", end="")
-        currentTime = 0
-        count = 0
-        now = datetime.now()
-        if currentTime == now.strftime("%H:%M:%S"):
-            count += 1
-        else:
-            currentTime = now.strftime("%H:%M:%S")
+            currentTime = 0
             count = 0
-        hrFile.write("(" + currentTime + "_" + str(count) + ") : ")
-        hrFile.write(message + "\n")
-        hrFile.flush()
-        print(message)
+            now = datetime.now()
+            if currentTime == now.strftime("%H:%M:%S"):
+                count += 1
+            else:
+                currentTime = now.strftime("%H:%M:%S")
+                count = 0
+            hrFile.write("(" + currentTime + "_" + str(count) + ") : ")
+            hrFile.write(recv_dict["hr"])
+            hrFile.flush()
+        print("Parse complete.")
 
 
 def setup(hostname):
@@ -96,12 +91,13 @@ def setup(hostname):
     client.on_connect = on_connect
     client.on_message = on_message
     print("Connecting")
+    client.username_pw_set("test", "testing")
     client.connect(hostname, 1883)
     client.loop_start()
     return client
 
 def main():
-    setup("broker.emqx.io")
+    setup("cs3237-v6b8lpphitxf.cedalo.cloud")    # Hostname
     if not os.path.exists(path):
         os.makedirs(path)
         print("Directory created")
