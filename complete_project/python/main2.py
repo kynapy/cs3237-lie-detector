@@ -1,9 +1,8 @@
 '''
 Main code used to operate. 
-Subscribes to CS3237/Group_22/data/images for facial images
-Subscribes to CS3237/Group_22/data/heartrate for heart rate
+Subscribes to CS3237/Group_22/data for facial images and heart rate data
 Subscribes to CS3237/Group_22/start for instructions
-Publishes to CS3237/Group_22/start the results of the ML model
+Publishes to CS3237/Group_22/lie the results of the ML model
 
 '''
 
@@ -33,10 +32,8 @@ def on_message(client, userdata, msg):
     if message == "start":
         # Start collecting data 
         print("Start data collection...")
-        client.subscribe("CS3237/Group_22/data/images")
-        print("Subscribed to /data/images")
-        # client.subscribe("CS3237/Group_22/data/heartrate")
-        # print("Subscribed to /data/heartrate", end = "\n\n")
+        client.subscribe("CS3237/Group_22/data")
+        print("Subscribed to /data")
 
         # Clear the data folder
         for filename in os.listdir(os.getcwd()):
@@ -50,10 +47,8 @@ def on_message(client, userdata, msg):
         print("Reading stopped.")
 
         # Terminate data collection
-        client.unsubscribe("CS3237/Group_22/data/images")
-        print("Unsubscribed from /data/images")
-        # client.unsubscribe("CS3237/Group_22/data/heartrate")
-        # print("Unsubscribed from /data/heartrate", end = "\n\n")
+        client.unsubscribe("CS3237/Group_22/data")
+        print("Unsubscribed from /data")
             
         # Calculate result using model
         global prediction
@@ -63,12 +58,12 @@ def on_message(client, userdata, msg):
         except:
             print("Invalid input")
             exit(1)
-        # result = prediction(os.getcwd())
+        result = prediction(os.getcwd())
         lie = (result<0.5)
 
         # Return result
         if lie:
-            client.publish("CS3237/Group_22/result", "lie")
+            client.publish("CS3237/Group_22/lie", "lie")
 
     else:   # Image data
         print("Image received")
@@ -95,13 +90,13 @@ def setup(hostname):
     client.on_connect = on_connect
     client.on_message = on_message
     print("Connecting")
+    client.username_pw_set("test", "testing")
     client.connect(hostname, 1883)
     client.loop_start()
     return client
 
 def main():
-    setup("localhost")
-    #setup("broker.emqx.io")
+    setup("cs3237-v6b8lpphitxf.cedalo.cloud")
     if not os.path.exists(path):
         os.makedirs(path)
         print("Directory created")
