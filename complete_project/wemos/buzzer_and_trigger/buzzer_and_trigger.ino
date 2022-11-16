@@ -11,7 +11,7 @@
 const char* ssid = "kynapy";
 const char* password = "KYNAPY123";
 
-const char* mqtt_broker = "broker.emqx.io";
+const char* mqtt_broker = "cs3237-v6b8lpphitxf.cedalo.cloud";
 const char* topic = "CS3237/Group_22/start";
 const int mqtt_port = 1883;
 
@@ -26,8 +26,10 @@ IRAM_ATTR void toggle() {
   if (interrupt_time - last_isr_time > 200) {
     if (!state){
       client.publish(topic, "start");
+      Serial.println("Reading start");
     } else {
       client.publish(topic, "stop");
+      Serial.println("Reading stop");
     }
     state = !state;
     Serial.println("Button pressed");
@@ -59,7 +61,7 @@ void connectToMqtt() {
     String client_id = "esp8266-client-";
     client_id += String(WiFi.macAddress());
     Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
-    if (client.connect(client_id.c_str())) {
+    if (client.connect(client_id.c_str(), "test", "testing")) {
       delay(200);
     } else {
       Serial.print("failed with state ");
@@ -77,13 +79,13 @@ void setup() {
   pinMode(speakerPin, OUTPUT);
   pinMode(BUTTON, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BUTTON),toggle, RISING);
-  //client.publish(topic, "Joined Group_22/data");
-  client.subscribe("CS3237/Group_22/result");
+  client.subscribe("CS3237/Group_22/lie");
 }
 
 void buzz() {
   analogWrite(speakerPin,255);
   //buzzTime = millis();
+  Serial.println("Lie detected!");
   delay(2000);
   analogWrite(speakerPin, 0);
 }
