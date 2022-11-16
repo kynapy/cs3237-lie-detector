@@ -14,23 +14,29 @@ from datetime import datetime
 # Camera initialization
 frameWidth = 480
 frameHeight = 480
+sending = False
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected with the result code " + str(rc))
-        client.subscribe("CS3237/Group_22/data/images")
+        client.subscribe("CS3237/Group_22/start")
     else:
         print("Connection failed with error code: %d." % rc)
 
 def on_message(client, userdata, msg):
-    pass
+    message = str(msg.payload.decode("utf-8"))
+    global sending
+    if message == "start":
+        sending = True
+    elif message == "stop":
+        sending = False
 
 def setup(hostname):
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
     print("Connecting")
-    client.username_pw_set("test", "testing")
+    client.username_pw_set("kynapy", "kynapy123")
     client.connect(hostname, 1883)
     client.loop_start()
     return client
@@ -65,9 +71,9 @@ while cap.isOpened():
         # Send image up through MQTT broker
         img_list = img.tolist()
         send_dict = {"filename":filename, "data":img_list, "hr":data}
-        if type(img_list) == list:
+        if type(img_list) == list and sending:
             print("Sent data")
-            client.publish("CS3237/Group_22/data/images", json.dumps(send_dict))
+            client.publish("CS3237/Group_22/data", json.dumps(send_dict))
         if cv2.waitKey(10) & 0xFF == ord('q'):
            break
     sleep(1)
