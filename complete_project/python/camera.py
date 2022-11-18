@@ -42,10 +42,11 @@ def setup(hostname):
     return client
 
 client = setup("cs3237-v6b8lpphitxf.cedalo.cloud")    # Hostname
+cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
 cap.set(10, 150)
-serial = serial.Serial("/dev/cu.usbserial-210", 9600, timeout=1)    # Change when using
+serial = serial.Serial("/dev/cu.usbserial-10", 9600, timeout=1)    # Change when using
 
 currentTime = 0
 count = 0

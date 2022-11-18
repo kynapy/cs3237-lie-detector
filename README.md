@@ -12,7 +12,7 @@ The code used for the project is in the `/complete_project` directory, with the 
 ## External Links
 1. [Project Proposal](https://docs.google.com/document/d/1GnE9zQQFZGiXMbUGtiYWFBUu-CAOxkHn/edit?usp=sharing&ouid=109384428354644706956&rtpof=true&sd=true)
 2. [Project Report](https://docs.google.com/document/d/19EIODqlSxa6WgW19Ab_0fNh2WY51sCD-WKREVFHCPhA/edit?usp=sharing)
-3. [Project Demo]() (Will be updated)
+3. [Project Demo Video](https://youtu.be/vcrdLATUtsM)
 
 <br>
 
